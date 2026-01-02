@@ -49,6 +49,12 @@ solution_file = 'CRO_LogReg_'+filename+'.csv'
 sol_data.to_csv(indiv_file,sep=' ',header=sol_data.columns,index=None)
 
 
+# LAG and WINDOW
+MAX_LAG = 180
+MAX_WINDOW = 60
+MAX_SHIFT = MAX_LAG + MAX_WINDOW
+NLEN = len(pred_dataframe)
+lagged_pred_dataframe = pred_dataframe[MAX_LAG:]
 
 # Split the dataset into train and test
 first_train = 1951
@@ -94,16 +100,21 @@ class ml_prediction(AbsObjectiveFunc):
             return 100000
 
 
-
+        # BOTTLENECK!
         # # Create dataset according to solution
-        dataset_opt = target_dataset.copy()
-        for i,col in enumerate(pred_dataframe.columns):
-            if variable_selection[i] == 0 or time_sequences[i] == 0:
-                continue
-            for j in range(time_sequences[i]):
-                dataset_opt[str(col)+'_lag'+str(time_lags[i]+j)] = pred_dataframe[col].shift(time_lags[i]+j)
+        # dataset_opt = target_dataset.copy()
+        # for i,col in enumerate(pred_dataframe.columns):
+        #     if variable_selection[i] == 0 or time_sequences[i] == 0:
+        #         continue
+        #     for j in range(time_sequences[i]):
+        #         dataset_opt[str(col)+'_lag'+str(time_lags[i]+j)] = pred_dataframe[col].shift(time_lags[i]+j)
 
-            
+        X_blocks = []
+        col_meta = []
+        for var_i, col in enumerate(pred_dataframe.columns):
+            s = pred_dataframe[col].to_numpy()
+            for lag in range(1, MAX_LAG + 1):
+                xlag = s[MAX_LAG - lag : NLEN - lag]
         # Split dataset into train and test
 
         train_dataset = dataset_opt[train_indices]
