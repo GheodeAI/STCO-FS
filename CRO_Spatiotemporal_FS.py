@@ -115,6 +115,11 @@ class ml_prediction(AbsObjectiveFunc):
             s = pred_dataframe[col].to_numpy()
             for lag in range(1, MAX_LAG + 1):
                 xlag = s[MAX_LAG - lag : NLEN - lag]
+                X_blocks.append(xlag.reshape(-1, 1))
+                col_meta.append(var_i, lag)
+
+        X_full = np.hstack(X_blocks)
+        y_full 
         # Split dataset into train and test
 
         train_dataset = dataset_opt[train_indices]
