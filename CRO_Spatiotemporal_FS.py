@@ -13,6 +13,12 @@ import numpy as np
 import os
 
 
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score
+import time
+
 
 
 """
@@ -55,7 +61,7 @@ MAX_WINDOW = 60
 MAX_SHIFT = MAX_LAG + MAX_WINDOW
 NLEN = len(pred_dataframe)
 idx_pred = pred_dataframe.index[MAX_SHIFT:]
-valid_idx = idx_pred.intersection(target_dataset.index)
+valid_idx = idx_pred.intersection(target_dataset.index) # Valid indices
 
 X_blocks = []
 col_meta = []
@@ -75,6 +81,26 @@ pos = idx_pred.get_indexer(valid_idx)
 X_full = X_full[pos, :]
 
 y_full = target_dataset.reindex(valid_idx)['Target'].to_numpy()
+
+# Train and test masks
+first_train_year = 1950
+last_train_year = 2010
+train_mask = ((valid_idx.year >= first_train_year) & (valid_idx.year <= last_train_year))
+test_mask = ((valid_idx.year > last_train_year))
+
+# First split to avoid overload in memory
+X_train_full = X_full[train_mask]
+X_test_full  = X_full[test_mask]
+y_train_full = y_full[train_mask]
+y_test_full  = y_full[test_mask]
+
+# Avoiding standardization per generation
+mu = X_train_full.mean(axis=0)
+sigma = X_train_full.std(axis=0)
+sigma[sigma == 0] = 1
+
+# Cache to avoid computing repeated solutions
+fitness_cache = {}
 
 def solution_to_selected_cols(solution, p, col_index, max_shift):
     time_sequences = np.array(solution[:p]).astype(int)
@@ -119,18 +145,14 @@ class ml_prediction(AbsObjectiveFunc):
     This will be the objective function, that will recieve a vector and output a number
     """
     def objective(self, solution):
+        t0 = time.perf_counter()
         # print(solution)
         # Read data
         # sol_file = pd.read_csv(indiv_file,sep=' ',header=0)
         history = []
-        # Read solution
-        time_sequences = np.append(np.array(solution[:pred_dataframe.shape[1]]).astype(int),1)
-        time_lags = np.append(np.array(solution[pred_dataframe.shape[1]:(2*pred_dataframe.shape[1])]).astype(int),1)
-        variable_selection = np.array(solution[(2*pred_dataframe.shape[1]):]).astype(int)
-
-        if sum(variable_selection) == 0:  # If no variables are selected, return a high value
-            return 100000
-
+        key = tuple(solution)
+        if key in fitness_cache: # If the solution has been computed before, return the cached value
+            return fitness_cache[key]
 
         # BOTTLENECK!
         # # Create dataset according to solution
@@ -141,48 +163,42 @@ class ml_prediction(AbsObjectiveFunc):
         #     for j in range(time_sequences[i]):
         #         dataset_opt[str(col)+'_lag'+str(time_lags[i]+j)] = pred_dataframe[col].shift(time_lags[i]+j)
 
+        selected_cols = solution_to_selected_cols(
+            solution, 
+            pred_dataframe.shape[1], 
+            col_index, 
+            MAX_SHIFT
+            )
+        if len(selected_cols) == 0:
+            return 100000
 
-        selected_cols = []
-        for i in range(nvars):
-            if variable_selection[i] == 0:
-                continue
-            start = int(time_lags[i])
-            length = int(time_sequences[i])
-            for j in range(length):
-                lag = start + j
-                if 1 <= lag <= MAX_LAG:
-                    selected_cols.append(col_index[i, lag])
+        X_train = X_train_full[:, selected_cols]
+        Y_train = y_train_full
 
-        X_train = X_full[train_mask][:, selected_cols]
-        Y_train = y_full[train_mask]
+        X_test = X_test_full[:, selected_cols]
+        Y_test = y_test_full
 
-        X_test = X_full[test_mask][:, selected_cols]
-        Y_test = y_full[test_mask]
-            
-        from sklearn import preprocessing
-        scaler = preprocessing.StandardScaler()
-        X_std_train = scaler.fit(X_train)
+        X_std_train = (X_train - mu[selected_cols]) / sigma[selected_cols]
+        X_std_test = (X_test - mu[selected_cols]) / sigma[selected_cols]
 
-        X_std_train = scaler.transform(X_train)
-        X_std_test = scaler.transform(X_test)
 
-        X_train=pd.DataFrame(X_std_train,columns=X_train.columns,index=X_train.index)
-        X_test=pd.DataFrame(X_std_test,columns=X_test.columns,index=X_test.index)
-
-        from sklearn.pipeline import make_pipeline
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.model_selection import cross_val_score
 
         # Train model
-        clf = make_pipeline(StandardScaler(), LogisticRegression())
+        clf = LogisticRegression()
         # Apply cross validation
-        score = cross_val_score(clf, X_train, Y_train, cv=5,scoring='f1', n_jobs=-1)
+        # clf.fit(X_std_train, Y_train)
+        score = cross_val_score(clf, X_std_train, Y_train, cv=5, scoring='f1').mean()
         # Save solution
-        history.append([score.mean(), f1_score(Y_pred, Y_test), solution])
-        return 1/score.mean()
-    
+        history.append([score, Y_test, solution])
+        clf.fit(X_std_train, Y_train)
+        Y_pred = clf.predict(X_std_test)
+        print(score, f1_score(Y_pred,Y_test))
 
+        fitness_cache[key] = 1/score
+        elapsed = time.perf_counter() - t0
+        print(f"objective time: {elapsed:.4f} s")
+    
+        return 1/score
     
     """
     This will be the function used to generate random vectorsfor the initializatio of the algorithm
