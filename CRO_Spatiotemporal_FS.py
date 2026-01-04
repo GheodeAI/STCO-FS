@@ -54,14 +54,46 @@ MAX_LAG = 180
 MAX_WINDOW = 60
 MAX_SHIFT = MAX_LAG + MAX_WINDOW
 NLEN = len(pred_dataframe)
-lagged_pred_dataframe = pred_dataframe[MAX_LAG:]
+idx_pred = pred_dataframe.index[MAX_SHIFT:]
+valid_idx = idx_pred.intersection(target_dataset.index)
 
-# Split the dataset into train and test
-first_train = 1951
-last_train = 2010
+X_blocks = []
+col_meta = []
+col_index = {} # To identify lags
+col_id = 0
+for var_i, col in enumerate(pred_dataframe.columns):
+    s = pred_dataframe[col].to_numpy()
+    for lag in range(1, MAX_SHIFT + 1):
+        xlag = s[MAX_SHIFT - lag : NLEN - lag]
+        X_blocks.append(xlag.reshape(-1, 1))
+        col_meta.append((var_i, lag))
+        col_index[(var_i, lag)] = col_id 
+        col_id += 1
 
-train_indices = (target_dataset.index.year >=first_train) & (target_dataset.index.year <=last_train)
-test_indices = (target_dataset.index.year >last_train)
+X_full = np.hstack(X_blocks).astype(np.float32)
+pos = idx_pred.get_indexer(valid_idx)
+X_full = X_full[pos, :]
+
+y_full = target_dataset.reindex(valid_idx)['Target'].to_numpy()
+
+def solution_to_selected_cols(solution, p, col_index, max_shift):
+    time_sequences = np.array(solution[:p]).astype(int)
+    time_lags      = np.array(solution[p:2*p]).astype(int)
+    variable_sel   = np.array(solution[2*p:3*p]).astype(int)
+
+    selected_cols = []
+    for i in range(p):
+        if variable_sel[i] == 0:
+            continue
+        win = int(time_sequences[i])
+        if win <= 0:
+            continue
+        start = int(time_lags[i])
+        for j in range(win):
+            lag = start + j
+            if 1 <= lag <= max_shift:
+                selected_cols.append(col_index[(i, lag)])
+    return selected_cols
 
 """
 All the following methods will have to be implemented for the algorithm to work properly
@@ -89,8 +121,8 @@ class ml_prediction(AbsObjectiveFunc):
     def objective(self, solution):
         # print(solution)
         # Read data
-        sol_file = pd.read_csv(indiv_file,sep=' ',header=0)
-
+        # sol_file = pd.read_csv(indiv_file,sep=' ',header=0)
+        history = []
         # Read solution
         time_sequences = np.append(np.array(solution[:pred_dataframe.shape[1]]).astype(int),1)
         time_lags = np.append(np.array(solution[pred_dataframe.shape[1]:(2*pred_dataframe.shape[1])]).astype(int),1)
@@ -109,30 +141,23 @@ class ml_prediction(AbsObjectiveFunc):
         #     for j in range(time_sequences[i]):
         #         dataset_opt[str(col)+'_lag'+str(time_lags[i]+j)] = pred_dataframe[col].shift(time_lags[i]+j)
 
-        X_blocks = []
-        col_meta = []
-        for var_i, col in enumerate(pred_dataframe.columns):
-            s = pred_dataframe[col].to_numpy()
-            for lag in range(1, MAX_LAG + 1):
-                xlag = s[MAX_LAG - lag : NLEN - lag]
-                X_blocks.append(xlag.reshape(-1, 1))
-                col_meta.append(var_i, lag)
 
-        X_full = np.hstack(X_blocks)
-        y_full 
-        # Split dataset into train and test
+        selected_cols = []
+        for i in range(nvars):
+            if variable_selection[i] == 0:
+                continue
+            start = int(time_lags[i])
+            length = int(time_sequences[i])
+            for j in range(length):
+                lag = start + j
+                if 1 <= lag <= MAX_LAG:
+                    selected_cols.append(col_index[i, lag])
 
-        train_dataset = dataset_opt[train_indices]
-        test_dataset = dataset_opt[test_indices]
-        
-        # Standardize data
-        Y_column = 'Target' 
-            
-        X_train=train_dataset[train_dataset.columns.drop([Y_column]) ]
-        Y_train=train_dataset[Y_column]
+        X_train = X_full[train_mask][:, selected_cols]
+        Y_train = y_full[train_mask]
 
-        X_test=test_dataset[test_dataset.columns.drop([Y_column]) ]
-        Y_test=test_dataset[Y_column]
+        X_test = X_full[test_mask][:, selected_cols]
+        Y_test = y_full[test_mask]
             
         from sklearn import preprocessing
         scaler = preprocessing.StandardScaler()
@@ -144,23 +169,17 @@ class ml_prediction(AbsObjectiveFunc):
         X_train=pd.DataFrame(X_std_train,columns=X_train.columns,index=X_train.index)
         X_test=pd.DataFrame(X_std_test,columns=X_test.columns,index=X_test.index)
 
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.model_selection import cross_val_score
 
         # Train model
-        from sklearn.metrics import f1_score, mean_absolute_error
-        from sklearn.linear_model import LogisticRegression
-        clf = LogisticRegression()
-
-
+        clf = make_pipeline(StandardScaler(), LogisticRegression())
         # Apply cross validation
-        from sklearn.model_selection import cross_val_score
-        score = cross_val_score(clf, X_train, Y_train, cv=5,scoring='f1')
-        clf.fit(X_train, Y_train)
-        Y_pred = clf.predict(X_test)
-        print(score.mean(), f1_score(Y_pred,Y_test))
-
+        score = cross_val_score(clf, X_train, Y_train, cv=5,scoring='f1', n_jobs=-1)
         # Save solution
-        sol_file = pd.concat([sol_file, pd.DataFrame({'CV': [score.mean()], 'Test': [f1_score(Y_pred, Y_test)], 'Sol': [solution]})], ignore_index=True)
-        sol_file.to_csv(indiv_file,sep=' ',header=sol_file.columns,index=None)
+        history.append([score.mean(), f1_score(Y_pred, Y_test), solution])
         return 1/score.mean()
     
 
