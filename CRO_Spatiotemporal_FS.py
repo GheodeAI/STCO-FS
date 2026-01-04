@@ -15,9 +15,11 @@ import os
 
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.model_selection import cross_val_score
 import time
+
+from joblib import parallel_backend
 
 
 
@@ -187,7 +189,8 @@ class ml_prediction(AbsObjectiveFunc):
         clf = LogisticRegression()
         # Apply cross validation
         # clf.fit(X_std_train, Y_train)
-        score = cross_val_score(clf, X_std_train, Y_train, cv=5, scoring='f1').mean()
+        score = cross_val_score(clf, X_std_train, Y_train, cv=5, scoring="f1").mean()
+
         # Save solution
         history.append([score, Y_test, solution])
         clf.fit(X_std_train, Y_train)
