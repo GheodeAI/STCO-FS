@@ -11,6 +11,7 @@ warnings.filterwarnings('ignore')
 import pandas as pd
 import numpy as np
 import os
+import time 
 
 
 
@@ -83,6 +84,8 @@ class ml_prediction(AbsObjectiveFunc):
     def objective(self, solution):
         # print(solution)
         # Read data
+        t0 = time.perf_counter()
+
         sol_file = pd.read_csv(indiv_file,sep=' ',header=0)
 
         # Read solution
@@ -145,6 +148,9 @@ class ml_prediction(AbsObjectiveFunc):
         # Save solution
         sol_file = pd.concat([sol_file, pd.DataFrame({'CV': [score.mean()], 'Test': [f1_score(Y_pred, Y_test)], 'Sol': [solution]})], ignore_index=True)
         sol_file.to_csv(indiv_file,sep=' ',header=sol_file.columns,index=None)
+        elapsed = time.perf_counter() - t0
+        print(f"objective time: {elapsed:.4f} s")
+
         return 1/score.mean()
     
 
