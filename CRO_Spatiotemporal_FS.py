@@ -61,6 +61,7 @@ sol_data.to_csv(indiv_file,sep=' ',header=sol_data.columns,index=None)
 MAX_LAG = 180
 MAX_WINDOW = 60
 MAX_SHIFT = MAX_LAG + MAX_WINDOW
+HORIZON = 0
 NLEN = len(pred_dataframe)
 idx_pred = pred_dataframe.index[MAX_SHIFT:]
 valid_idx = idx_pred.intersection(target_dataset.index) # Valid indices
@@ -71,7 +72,7 @@ col_index = {} # To identify lags
 col_id = 0
 for var_i, col in enumerate(pred_dataframe.columns):
     s = pred_dataframe[col].to_numpy()
-    for lag in range(1, MAX_SHIFT + 1):
+    for lag in range(1, MAX_SHIFT + 1-HORIZON):
         xlag = s[MAX_SHIFT - lag : NLEN - lag]
         X_blocks.append(xlag.reshape(-1, 1))
         col_meta.append((var_i, lag))
