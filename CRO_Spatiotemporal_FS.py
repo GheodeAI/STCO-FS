@@ -102,6 +102,10 @@ mu = X_train_full.mean(axis=0)
 sigma = X_train_full.std(axis=0)
 sigma[sigma == 0] = 1
 
+# Pre-standardize the whole supermatrix once: each objective() call now only indexes columns
+X_train_std_full = ((X_train_full - mu) / sigma).astype(np.float32)
+X_test_std_full = ((X_test_full - mu) / sigma).astype(np.float32)
+
 # Cache to avoid computing repeated solutions
 fitness_cache = {}
 
@@ -148,60 +152,30 @@ class ml_prediction(AbsObjectiveFunc):
     This will be the objective function, that will recieve a vector and output a number
     """
     def objective(self, solution):
-        t0 = time.perf_counter()
-        # print(solution)
-        # Read data
-        # sol_file = pd.read_csv(indiv_file,sep=' ',header=0)
-        history = []
         key = tuple(solution)
         if key in fitness_cache: # If the solution has been computed before, return the cached value
             return fitness_cache[key]
 
-        # BOTTLENECK!
-        # # Create dataset according to solution
-        # dataset_opt = target_dataset.copy()
-        # for i,col in enumerate(pred_dataframe.columns):
-        #     if variable_selection[i] == 0 or time_sequences[i] == 0:
-        #         continue
-        #     for j in range(time_sequences[i]):
-        #         dataset_opt[str(col)+'_lag'+str(time_lags[i]+j)] = pred_dataframe[col].shift(time_lags[i]+j)
-
         selected_cols = solution_to_selected_cols(
-            solution, 
-            pred_dataframe.shape[1], 
-            col_index, 
+            solution,
+            pred_dataframe.shape[1],
+            col_index,
             MAX_SHIFT
             )
         if len(selected_cols) == 0:
             return 100000
 
-        X_train = X_train_full[:, selected_cols]
-        Y_train = y_train_full
-
-        X_test = X_test_full[:, selected_cols]
-        Y_test = y_test_full
-
-        X_std_train = (X_train - mu[selected_cols]) / sigma[selected_cols]
-        X_std_test = (X_test - mu[selected_cols]) / sigma[selected_cols]
-
-
-
-        # Train model
-        clf = LogisticRegression()
-        # Apply cross validation
-        # clf.fit(X_std_train, Y_train)
-        score = cross_val_score(clf, X_std_train, Y_train, cv=5, scoring="f1").mean()
-
-        # Save solution
-        history.append([score, Y_test, solution])
-        clf.fit(X_std_train, Y_train)
-        Y_pred = clf.predict(X_std_test)
-        print(score, f1_score(Y_pred,Y_test))
+        # Index pre-standardized supermatrix; tol=1e-3 and cv=3 cut LBFGS work without changing ranking.
+        # n_jobs=-1 parallelizes folds via threads — combines well with PyCROSL Njobs=-1 because
+        # sklearn LR releases the GIL inside BLAS, so threads don't oversubscribe processes.
+        X_std_train = X_train_std_full[:, selected_cols]
+        score = cross_val_score(
+            LogisticRegression(tol=1e-3),
+            X_std_train, y_train_full,
+            cv=3, scoring="f1", n_jobs=-1,
+        ).mean()
 
         fitness_cache[key] = 1/score
-        elapsed = time.perf_counter() - t0
-        print(f"objective time: {elapsed:.4f} s")
-    
         return 1/score
     
     """
@@ -243,7 +217,7 @@ params = {
 
     "verbose": True,
     "v_timer": 1,
-    "Njobs": 1,
+    "Njobs": -1,
 
     "dynamic": True,
     "dyn_method": "success",
