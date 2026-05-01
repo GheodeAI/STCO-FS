@@ -1,0 +1,34 @@
+name: Ablation benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show machine info
+        run: |
+          echo "--- CPU ---"
+          nproc
+          grep "model name" /proc/cpuinfo | head -1
+          echo "--- Memory ---"
+          free -h
+          echo "--- Kernel ---"
+          uname -a
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install --quiet PyCROSL "scikit-learn" pandas numpy joblib
+
+      - name: Show numpy BLAS info
+        run: python -c "import numpy as np; np.show_config()"
+
+      - name: Run ablation
+        run: python -u ablation_linux.py
