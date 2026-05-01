@@ -1,8 +1,12 @@
 name: Ablation benchmark
 
 on:
-  push:
   workflow_dispatch:
+    inputs:
+      pop:
+        description: 'popSize'
+        default: '100'
+        required: true
 
 jobs:
   bench:
@@ -32,4 +36,7 @@ jobs:
         run: python -c "import numpy as np; np.show_config()"
 
       - name: Run ablation
+        env:
+          CRO_POP: ${{ inputs.pop }}
+          CRO_NEVAL: ${{ inputs.pop }}
         run: python -u ablation_linux.py
