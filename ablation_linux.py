@@ -160,7 +160,9 @@ def make_params(pop, neval, njobs):
     }
 
 
-POP, NEVAL = 20, 20
+import os as _os
+POP = int(_os.environ.get('CRO_POP', '20'))
+NEVAL = int(_os.environ.get('CRO_NEVAL', str(POP)))
 print(f"\nConfig CRO: popSize={POP}, Neval={NEVAL} (solo init)", flush=True)
 
 variants = [
