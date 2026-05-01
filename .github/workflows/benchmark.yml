@@ -26,7 +26,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        run: pip install --quiet PyCROSL "scikit-learn" pandas numpy joblib
+        run: pip install --quiet PyCROSL "scikit-learn" pandas numpy joblib matplotlib
 
       - name: Show numpy BLAS info
         run: python -c "import numpy as np; np.show_config()"
