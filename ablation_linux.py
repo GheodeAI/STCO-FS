@@ -161,9 +161,11 @@ def make_params(pop, neval, njobs):
 
 
 import os as _os
-POP = int(_os.environ.get('CRO_POP', '20'))
+POP = int(_os.environ.get('CRO_POP', '100'))     # default a 100 (config realista)
 NEVAL = int(_os.environ.get('CRO_NEVAL', str(POP)))
-print(f"\nConfig CRO: popSize={POP}, Neval={NEVAL} (solo init)", flush=True)
+SUBSET = _os.environ.get('CRO_SUBSET', '0,4,5,6,7')   # solo las claves para caber en 30 min
+SUBSET = set(int(x) for x in SUBSET.split(','))
+print(f"\nConfig CRO: popSize={POP}, Neval={NEVAL} (solo init)  subset={sorted(SUBSET)}", flush=True)
 
 variants = [
     ("V0 baseline (cv=5, tol=1e-4, extras, sin pre-std, Njobs=1)",
@@ -185,18 +187,22 @@ variants = [
 ]
 
 print(f"\n{'variante':<58} {'time':>7}  {'speedup':>8}  {'best 1/F1':>10}", flush=True)
-results = []
-for label, cfg, njobs in variants:
+results = {}
+base_time = None
+for idx, (label, cfg, njobs) in enumerate(variants):
+    if idx not in SUBSET:
+        continue
     np.random.seed(2026); pyrandom.seed(2026)
     obj = CfgObj(**cfg)
     cro = CRO_SL(obj, make_operators(), make_params(POP, NEVAL, njobs))
     t0 = time.perf_counter()
     sol, fit = cro.optimize()
     t = time.perf_counter() - t0
-    base = results[0][1] if results else t
-    print(f"{label:<58} {t:>6.1f}s  x{base/t:>7.2f}  {fit:>10.4f}", flush=True)
-    results.append((label, t, fit, sol))
+    if base_time is None:
+        base_time = t
+    print(f"{label:<58} {t:>6.1f}s  x{base_time/t:>7.2f}  {fit:>10.4f}", flush=True)
+    results[idx] = (label, t, fit, sol)
 
-sol_V0, sol_V4 = results[0][3], results[4][3]
-same = np.array_equal(sol_V0, sol_V4)
-print(f"\nMisma mejor solución V0 vs V4: {same}", flush=True)
+if 0 in results and 4 in results:
+    same = np.array_equal(results[0][3], results[4][3])
+    print(f"\nMisma mejor solución V0 vs V4: {same}", flush=True)
