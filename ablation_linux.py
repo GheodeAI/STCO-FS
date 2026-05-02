@@ -163,7 +163,7 @@ def make_params(pop, neval, njobs):
 import os as _os
 POP = int(_os.environ.get('CRO_POP', '100'))     # default a 100 (config realista)
 NEVAL = int(_os.environ.get('CRO_NEVAL', str(POP)))
-SUBSET = _os.environ.get('CRO_SUBSET', '0,4,5,6,7')   # solo las claves para caber en 30 min
+SUBSET = _os.environ.get('CRO_SUBSET', '4,5,6,7')   # V0 a popSize=100 no cabe en 30 min
 SUBSET = set(int(x) for x in SUBSET.split(','))
 print(f"\nConfig CRO: popSize={POP}, Neval={NEVAL} (solo init)  subset={sorted(SUBSET)}", flush=True)
 
