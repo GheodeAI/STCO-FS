@@ -71,8 +71,13 @@ col_meta = []
 col_index = {} # To identify lags
 col_id = 0
 for var_i, col in enumerate(pred_dataframe.columns):
+<<<<<<< Updated upstream
     s = pred_dataframe[col].to_numpy()
     for lag in range(1, MAX_SHIFT + 1-HORIZON):
+=======
+    s = pred_dataframe[col].to_numpy() # each column is a time series
+    for lag in range(1, MAX_SHIFT + 1):
+>>>>>>> Stashed changes
         xlag = s[MAX_SHIFT - lag : NLEN - lag]
         X_blocks.append(xlag.reshape(-1, 1))
         col_meta.append((var_i, lag))
