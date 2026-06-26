@@ -71,13 +71,8 @@ col_meta = []
 col_index = {} # To identify lags
 col_id = 0
 for var_i, col in enumerate(pred_dataframe.columns):
-<<<<<<< Updated upstream
-    s = pred_dataframe[col].to_numpy()
-    for lag in range(1, MAX_SHIFT + 1-HORIZON):
-=======
     s = pred_dataframe[col].to_numpy() # each column is a time series
-    for lag in range(1, MAX_SHIFT + 1):
->>>>>>> Stashed changes
+    for lag in range(1, MAX_SHIFT + 1 - HORIZON):
         xlag = s[MAX_SHIFT - lag : NLEN - lag]
         X_blocks.append(xlag.reshape(-1, 1))
         col_meta.append((var_i, lag))
@@ -192,7 +187,7 @@ class ml_prediction(AbsObjectiveFunc):
 
 
         # Train model
-        clf = LogisticRegression()
+        clf = LogisticRegression(class_weight='balanced')
         # Apply cross validation
         # clf.fit(X_std_train, Y_train)
         score = cross_val_score(clf, X_std_train, Y_train, cv=5, scoring="f1").mean()
@@ -203,11 +198,15 @@ class ml_prediction(AbsObjectiveFunc):
         Y_pred = clf.predict(X_std_test)
         print(score, f1_score(Y_pred,Y_test))
 
-        fitness_cache[key] = 1/score
+        # Guard against score == 0 (frequent with imbalanced target): 1/0 -> inf
+        # would collapse many solutions to the same fitness and break the
+        # dynamic (avg-based) operator adaptation.
+        fitness = 1/score if score > 0 else 100000
+        fitness_cache[key] = fitness
         elapsed = time.perf_counter() - t0
         print(f"objective time: {elapsed:.4f} s")
-    
-        return 1/score
+
+        return fitness
     
     """
     This will be the function used to generate random vectorsfor the initializatio of the algorithm
