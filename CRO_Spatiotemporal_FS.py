@@ -48,6 +48,18 @@ pred_dataframe.index = pd.to_datetime(pred_dataframe.index)
 target_dataset = pd.read_csv(path_input+target_file, index_col=0)
 target_dataset.index = pd.to_datetime(target_dataset.index)
 
+# The positional lagging below assumes the predictors are daily and gap-free:
+# moving back 'lag' positions must equal moving back 'lag' calendar days. If the
+# source is ever regenerated with a missing day (or duplicates/out-of-order
+# dates), the lags would silently misalign, so fail loudly here instead.
+_expected_idx = pd.date_range(pred_dataframe.index.min(), pred_dataframe.index.max(), freq='D')
+if not pred_dataframe.index.equals(_expected_idx):
+    raise ValueError(
+        "Predictors index must be daily, ordered and gap-free for positional "
+        f"lagging: got {len(pred_dataframe)} rows vs {len(_expected_idx)} "
+        "expected daily dates between min and max."
+    )
+
 
 # Create an empty file to store the solutions provided by the algorithm
 sol_data = pd.DataFrame(columns=['CV','Test','Sol'])
@@ -66,22 +78,22 @@ NLEN = len(pred_dataframe)
 idx_pred = pred_dataframe.index[MAX_SHIFT:]
 valid_idx = idx_pred.intersection(target_dataset.index) # Valid indices
 
-X_blocks = []
+# Preallocate the supermatrix and fill it column by column directly in
+# float32, keeping only the valid rows. Avoids building a list of ~17k
+# blocks + hstack + float64 cast, which peaked at ~5.4 GB; this stays ~0.6 GB.
 col_meta = []
 col_index = {} # To identify lags
+n_lags = MAX_SHIFT - HORIZON
+pos = idx_pred.get_indexer(valid_idx) # valid rows (intersection with target)
+X_full = np.empty((len(valid_idx), pred_dataframe.shape[1] * n_lags), dtype=np.float32)
 col_id = 0
 for var_i, col in enumerate(pred_dataframe.columns):
     s = pred_dataframe[col].to_numpy() # each column is a time series
-    for lag in range(1, MAX_SHIFT + 1 - HORIZON):
-        xlag = s[MAX_SHIFT - lag : NLEN - lag]
-        X_blocks.append(xlag.reshape(-1, 1))
+    for lag in range(1, n_lags + 1):
+        X_full[:, col_id] = s[MAX_SHIFT - lag : NLEN - lag][pos]
         col_meta.append((var_i, lag))
-        col_index[(var_i, lag)] = col_id 
+        col_index[(var_i, lag)] = col_id
         col_id += 1
-
-X_full = np.hstack(X_blocks).astype(np.float32)
-pos = idx_pred.get_indexer(valid_idx)
-X_full = X_full[pos, :]
 
 y_full = target_dataset.reindex(valid_idx)['Target'].to_numpy()
 
@@ -152,7 +164,6 @@ class ml_prediction(AbsObjectiveFunc):
         # print(solution)
         # Read data
         # sol_file = pd.read_csv(indiv_file,sep=' ',header=0)
-        history = []
         key = tuple(solution)
         if key in fitness_cache: # If the solution has been computed before, return the cached value
             return fitness_cache[key]
@@ -178,25 +189,16 @@ class ml_prediction(AbsObjectiveFunc):
         X_train = X_train_full[:, selected_cols]
         Y_train = y_train_full
 
-        X_test = X_test_full[:, selected_cols]
-        Y_test = y_test_full
-
         X_std_train = (X_train - mu[selected_cols]) / sigma[selected_cols]
-        X_std_test = (X_test - mu[selected_cols]) / sigma[selected_cols]
 
-
-
-        # Train model
+        # Train model and score it with cross-validation only. The fit/predict
+        # on the TEST set was removed from here: it did not feed the fitness
+        # (only a diagnostic print), cost ~18% of every evaluation, and peeking
+        # at the test set on each eval is methodologically wrong. The test f1 is
+        # now computed once at the end, on the best solution (see bottom of file).
         clf = LogisticRegression(class_weight='balanced')
-        # Apply cross validation
-        # clf.fit(X_std_train, Y_train)
         score = cross_val_score(clf, X_std_train, Y_train, cv=5, scoring="f1").mean()
-
-        # Save solution
-        history.append([score, Y_test, solution])
-        clf.fit(X_std_train, Y_train)
-        Y_pred = clf.predict(X_std_test)
-        print(score, f1_score(Y_pred,Y_test))
+        print("CV f1:", score)
 
         # Guard against score == 0 (frequent with imbalanced target): 1/0 -> inf
         # would collapse many solutions to the same fitness and break the
@@ -274,4 +276,18 @@ cro_alg = CRO_SL(objfunc, operators, params)
 solution, obj_value = cro_alg.optimize()
 
 solution.tofile(path_output+solution_file, sep=',')
+
+# Final evaluation of the best solution on the held-out TEST set, done once
+# here instead of on every objective() call (see objective() for the rationale).
+best_cols = solution_to_selected_cols(solution, pred_dataframe.shape[1], col_index, MAX_SHIFT)
+if len(best_cols) > 0:
+    X_std_train = (X_train_full[:, best_cols] - mu[best_cols]) / sigma[best_cols]
+    X_std_test = (X_test_full[:, best_cols] - mu[best_cols]) / sigma[best_cols]
+    clf = LogisticRegression(class_weight='balanced')
+    clf.fit(X_std_train, y_train_full)
+    y_pred = clf.predict(X_std_test)
+    print(f"Best solution: CV fitness={obj_value:.4f}  #cols={len(best_cols)}  "
+          f"test f1={f1_score(y_test_full, y_pred):.4f}")
+else:
+    print("Best solution selects no columns.")
 
