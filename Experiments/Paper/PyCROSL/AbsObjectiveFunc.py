@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from threading import Lock
 
 class AbsObjectiveFunc(ABC):
     """
@@ -16,6 +17,7 @@ class AbsObjectiveFunc(ABC):
         self.opt = opt
         self.sup_lim = sup_lim
         self.inf_lim = inf_lim
+        self._counter_lock = Lock()
         if self.opt == "min":
             self.factor = -1
     
@@ -25,7 +27,8 @@ class AbsObjectiveFunc(ABC):
         a maximization problem.
         """
 
-        self.counter += 1
+        with self._counter_lock:
+            self.counter += 1
         return self.factor * self.objective(solution)
     
     @abstractmethod

@@ -2,3 +2,5 @@
 Data/Paper/local_variables.csv
 Data/Paper/locals_variables.csv
 benchmark_n_jobs.py
+__pycache__/
+*.py[cod]

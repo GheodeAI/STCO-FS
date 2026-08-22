@@ -6,6 +6,11 @@ from PyCROSL.operators import *
 from joblib import Parallel, delayed 
 
 
+def _evaluate_solution(objfunc, solution):
+    """Evaluate one solution without mutating its Coral from a worker thread."""
+    return objfunc.fitness(solution)
+
+
 class Coral:
     """
     Individual that holds a tentative solution with 
@@ -355,15 +360,34 @@ class CoralPopulation:
         Calculate the fitnesses for a list of corals
         """
 
-        if n_jobs == 1 or n_jobs == -1:
+        if n_jobs == 0:
+            raise ValueError("n_jobs cannot be zero")
+        if n_jobs == 1 or len(corals) <= 1:
             for coral in corals:
                 coral.get_fitness()
             return corals
-        else:
-            # Separate corals into "N_jobs" partitions of equal size
-            partitions = np.array_split(corals, n_jobs)
-            results = Parallel(n_jobs=n_jobs)(delayed(self.evaluate_fitnesses)(part, 1) for part in partitions)
-            return [c for p in results for c in p]
+
+        pending = [coral for coral in corals if not coral.fitness_calculated]
+        if len(pending) == 0:
+            return corals
+
+        # Fitness evaluations are independent within the current generation.
+        # Threads share the large predictor matrix and the objective cache. The
+        # main thread applies results in input order after the batch completes.
+        fitness_values = Parallel(
+            n_jobs=n_jobs,
+            prefer="threads",
+            require="sharedmem",
+            batch_size=1,
+            pre_dispatch=n_jobs if n_jobs > 0 else "all",
+        )(
+            delayed(_evaluate_solution)(coral.objfunc, coral.solution)
+            for coral in pending
+        )
+        for coral, fitness in zip(pending, fitness_values):
+            coral.fitness = fitness
+            coral.fitness_calculated = True
+        return corals
 
     
     def larvae_setting(self, larvae_list):
